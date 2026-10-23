@@ -1,0 +1,20 @@
+{
+  "name": "bellntell",
+  "private": true,
+  "workspaces": ["apps/web", "apps/api", "packages/contracts"],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "npm run dev -w @bellntell/api",
+    "dev:web": "npm run dev -w @bellntell/web",
+    "setup:env": "node scripts/create-env.mjs",
+    "db:generate": "npm run db:generate -w @bellntell/api",
+    "db:migrate": "npm run db:migrate -w @bellntell/api",
+    "db:seed": "npm run db:seed -w @bellntell/api",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test -w @bellntell/api",
+    "test:browser": "npm run test:browser -w @bellntell/web",
+    "build": "npm run build --workspaces"
+  },
+  "engines": {"node": ">=24 <25"}
+}

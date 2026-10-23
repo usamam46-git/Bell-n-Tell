@@ -1,5 +1,11 @@
 ﻿# Test and evaluation strategy
 
+## Completion claim gate
+
+Do not declare a phase or user journey complete from green unit tests, typechecks, or builds alone. Start the application using the documented clean-start command and perform the owner's journey through the browser, the API, and PostgreSQL. Verify required services are reachable, then exercise relevant edge inputs and failure paths such as a stopped API, non-JSON proxy errors, invalid form values, expired/revoked sessions, CSRF rejection and cross-tenant access. Record the exact checks and results in `PROGRESS.md`. If a required path is unverified or broken, say so plainly and keep the phase open. A finite test set cannot prove every possible edge case; never describe it as exhaustive.
+
+Run each verification gate once after the relevant fix. Do not run build and typecheck concurrently when they share generated files. Repeat a gate only when it failed or a later edit invalidated its result; document the reason for the rerun.
+
 ## Test boundaries
 
 All default automated tests consume zero AI credit. Real PostgreSQL is mandatory for scheduling constraints, transaction recovery and tenancy. Distinguish three modes: owner preview (synthetic gateway and visibly simulated receipts), integration conversation (real engine/services/test DB, mocked interpretation/transport), and manually enabled live voice. Preview success is not proof of booking correctness.
