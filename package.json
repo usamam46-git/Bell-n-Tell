@@ -13,6 +13,8 @@
     "typecheck": "npm run typecheck --workspaces",
     "lint": "npm run lint --workspaces",
     "test": "npm run test -w @bellntell/api",
+    "test:isolated": "node --env-file=.env scripts/test-isolated.mjs",
+    "test:built": "node --env-file=.env scripts/smoke-built.mjs",
     "test:browser": "npm run test:browser -w @bellntell/web",
     "build": "npm run build --workspaces"
   },

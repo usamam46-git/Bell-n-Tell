@@ -19,6 +19,8 @@ The model cannot authorize itself. Owner-authenticated routes and public session
 
 ## Appointment ownership
 
+Phase 2 exposes deterministic browser management under `/public/:slug` before conversation sessions exist (ADR-018). A signed ten-minute verification handle binds a random HttpOnly browser cookie, business, appointment and current management credential. Each use reloads and checks that credential; owner reissue revokes outstanding proof. Writes require Origin and a cookie-bound CSRF token. Verification uses persisted rolling fifteen-minute budgets: at most five attempts per reference and thirty per IP, including successful attempts as a conservative bound. These browser handles do not grant owner privileges or access to other appointments.
+
 At booking issue a nonsequential reference and random management token with at least 128 bits of entropy. Store only a keyed hash. Deliver once through a scoped browser receipt with “Save management link”; use a URL fragment for the token, immediately read and clear it from the address bar, and submit it only to the verification endpoint. No token in query strings, referrers, analytics, provider tool results or normal event replay. Offer a paste field for the saved token; do not ask customers to dictate secrets to the voice model.
 
 Verification requires reference and token, compares hashes safely, and returns a handle bound to business, appointment and current session for 10 minutes or session close, whichever is sooner. Use it to read only that appointment and prepare management actions. Proof permits access; it does not bypass revision checks or explicit confirmation. Same-session booking may issue this scoped handle after commit without resubmitting the token.

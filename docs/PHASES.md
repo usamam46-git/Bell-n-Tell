@@ -1,6 +1,6 @@
 ﻿# Dependency-aware implementation plan
 
-**Current state: planning only. No implementation phase is authorized until the user explicitly asks.** The sequence below is the later execution plan. Every authorized milestone records changes, evidence, risks and next task in docs/PROGRESS.md; do not create application placeholders to satisfy this document.
+**Current state: Phases 1 and 2 implemented and locally verified by explicit user authorization. Later phases require a new user request.** The sequence below defines execution order and scope. Each milestone records changes, evidence, risks and next task in docs/PROGRESS.md; do not create application placeholders to satisfy this document.
 
 ## Phase 0 — Planning and review
 

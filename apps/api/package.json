@@ -18,7 +18,7 @@
     "@bellntell/contracts": "0.1.0",
     "@fastify/cookie": "^11.0.0",
     "argon2": "^0.44.0",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.4",
     "fastify": "^5.0.0",
     "pg": "^8.0.0",
     "zod": "^4.0.0"

@@ -1,6 +1,6 @@
 ﻿# Architecture and runtime boundaries
 
-Status: planning only. Implementation requires a later explicit user request.
+Status: Phases 1–2 implemented and locally verified. Conversation, builder and voice sections remain the later implementation plan and require their own authorization.
 
 ## System shape
 

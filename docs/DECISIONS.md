@@ -1,5 +1,11 @@
 # Architecture decision records
 
+## ADR-018 — Phase 2 browser management before conversation sessions (2026-10-24)
+
+Phase 2 is authorized. Add owner GET/PUT `/businesses/:b/scheduling-policy`, GET `/businesses/:b/availability`, and GET/reject on owner action proposals. Add public management routes under `/public/:slug`: appointment-verifications, managed-appointment, availability, action-proposals, proposal detail/confirm/reject. These are deterministic browser routes; they create no Phase 3 voice sessions. Verification issues a signed ten-minute handle bound to a random HttpOnly/SameSite browser cookie, tenant, appointment and current management-token hash. Each use reloads that appointment and checks the signature, cookie, expiry and token hash; rotation immediately revokes old proof. Origin plus a handle-derived CSRF token protects management writes. Only reference/token verification accepts the secret, in the JSON body. The browser reads and immediately removes the fragment. No raw secret is persisted or replayed; failed one-time delivery uses audited owner recovery.
+
+Setup/status/contact updates also use committed action_proposals as durable idempotency tombstones, storing only their ordinary result. Services/resources carry their own revisions in addition to the scheduling revision. Custom SQL in the generated migration adds exclusion constraints and an override-consistency trigger that Drizzle cannot express; retain that migration when generating later changes. No provider integration or paid service is introduced.
+
 Decisions are binding for the planned MVP unless new evidence justifies an amendment. Date: 2026-10-23; amended after architecture review. Implementation is not authorized until the user's later explicit request. See linked documents for contracts.
 
 ## ADR-001 — Receptionist domain, not general automation

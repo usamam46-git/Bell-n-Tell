@@ -1,6 +1,6 @@
 # Exact first implementation tasks for Sol
 
-**Authorization gate: do not execute these tasks yet. The user will explicitly request implementation later. Until then, this file is a plan only.**
+**Historical Phase 1 checklist:** Phases 1 and 2 have now been authorized, implemented and locally verified. See PROGRESS.md for evidence. The next task is Phase 3's deterministic fixed booking conversation core when explicitly authorized; do not start the later voice checkpoint or spend AI credit yet. The original foundation checklist below is retained for traceability.
 
 After explicit implementation authorization, read root [AGENTS.md](../AGENTS.md), then [PRODUCT.md](PRODUCT.md), [STACK.md](STACK.md), [ARCHITECTURE.md](ARCHITECTURE.md), [DATABASE.md](DATABASE.md), [API.md](API.md) and Phase 1 of [PHASES.md](PHASES.md). Begin **Phase 1 only**. The later bounded voice checkpoint belongs to Phase 3V, after deterministic services and the core controller exist.
 

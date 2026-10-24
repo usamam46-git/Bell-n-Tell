@@ -6,6 +6,8 @@ Do not declare a phase or user journey complete from green unit tests, typecheck
 
 Run each verification gate once after the relevant fix. Do not run build and typecheck concurrently when they share generated files. Repeat a gate only when it failed or a later edit invalidated its result; document the reason for the rerun.
 
+For Phases 1–2, `npm run test:isolated` creates/migrates/drops a generated disposable PostgreSQL database and runs the API suites. Append Vitest file/name filters to rerun only affected scenarios. `npm run test:browser` uses installed Chrome against the local stack and asserts PostgreSQL outcomes; `PLAYWRIGHT_CHANNEL=msedge` selects Edge. `npm run test:built` starts the compiled API on port 4001 and checks health plus a database-backed route after `npm run build`. On Windows PowerShell use npm.cmd if npm.ps1 is blocked. See PROGRESS.md for actual coverage and limits; these commands do not authorize later-phase or live-provider tests.
+
 ## Test boundaries
 
 All default automated tests consume zero AI credit. Real PostgreSQL is mandatory for scheduling constraints, transaction recovery and tenancy. Distinguish three modes: owner preview (synthetic gateway and visibly simulated receipts), integration conversation (real engine/services/test DB, mocked interpretation/transport), and manually enabled live voice. Preview success is not proof of booking correctness.

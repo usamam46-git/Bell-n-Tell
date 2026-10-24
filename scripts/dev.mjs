@@ -10,7 +10,11 @@ if (!existsSync(resolve(root, '.env'))) {
 }
 
 function run(command, args, { persistent = false } = {}) {
-  const child = spawn(command, args, { cwd: root, stdio: 'inherit', env: process.env });
+  // Run npm through its JS entry point; Windows cannot spawn npm.cmd directly.
+  const executable = command === 'npm' ? process.execPath : command;
+  const parameters = command === 'npm' ? [process.env.npm_execpath, ...args] : args;
+  const child = spawn(executable, parameters, { cwd: root, stdio: 'inherit', env: process.env, windowsHide: true });
+  if (persistent) child.once('error', (error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
   if (persistent) return child;
   return new Promise((resolvePromise, reject) => {
     child.once('error', reject);

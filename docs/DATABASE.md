@@ -4,6 +4,8 @@ This is a schema plan, not an executable migration. UUID primary keys; all tenan
 
 ## MVP tables and phase ownership
 
+Phase 2 implementation uses the eleven planned operations tables, with service/resource revisions and appointment timezone snapshots. Phase 1 tables are in `foundation-schema.ts`; `schema.ts` exports the complete Drizzle schema. Migration 0002 backfills default scheduling policies for existing businesses and adds btree_gist, appointment/hour/override exclusion constraints, closed-date uniqueness and a trigger rejecting contradictory closed/open overrides. These custom constraints are maintained in SQL alongside the generated migration/snapshot. Public management proof uses short-lived signed handles bound to a browser cookie and current token credential; it adds no speculative session table. See ADR-018.
+
 | Table / first phase | Key fields and constraints |
 | --- | --- |
 | users / 1 | normalized email unique, password_hash, name, recovery_code_hash, disabled_at; never store plaintext recovery code |
