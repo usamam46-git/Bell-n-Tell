@@ -69,3 +69,57 @@ export const managementProposal = z.strictObject({ handle: z.string().max(3000),
 export const managementConfirm = confirmInput.extend({ handle: z.string().max(3000) });
 export const availabilityInput = z.strictObject({ serviceId: uuid, resourceId: uuid.optional(), from: localDate, to: localDate }).refine(v => v.from <= v.to && (Date.parse(v.to)-Date.parse(v.from)) / 86400000 < 7, 'Choose a range of at most seven days');
 export const listInput = z.strictObject({ cursor: z.string().max(100).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
+
+// Phase 3: exact, non-executable conversation definitions and interpretation payloads.
+const copy = z.string().trim().min(1).max(500);
+const optionalCopy = z.string().trim().max(500);
+const targets = <T extends Record<string, z.ZodType>>(shape:T) => z.strictObject(shape);
+const blockBase = {id:uuid,label:z.string().trim().min(1).max(60)};
+const serviceIds = z.array(uuid).min(1).max(100).refine(v=>new Set(v).size===v.length);
+export const intent = z.enum(['question','book','manage','inquiry','human']);
+export const coreSlot = z.enum(['service_id','resource_id','preferred_date','starts_at','name','phone','email','inquiry_summary']);
+export const slotKey = z.union([coreSlot,z.string().regex(/^custom\.question_[0-9a-f-]{36}$/i)]);
+export const flowBlock = z.discriminatedUnion('kind',[
+ z.strictObject({...blockBase,kind:z.literal('Greet'),settings:z.strictObject({greeting:copy}),outcomes:targets({next:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Ask'),settings:z.strictObject({question:copy,slotKey:z.union([z.literal('inquiry_summary'),z.string().regex(/^custom\.question_[0-9a-f-]{36}$/i)]),answerKind:z.enum(['text','choice']),required:z.boolean(),maxLength:z.int().min(1).max(500),choices:z.array(z.string().trim().min(1).max(60)).min(2).max(5).optional(),retryCopy:optionalCopy.optional()}),outcomes:targets({answered:uuid,skipped:uuid.optional(),failed:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Understand'),settings:z.strictObject({enabledIntents:z.array(intent).min(1).max(5),clarificationCopy:copy}),outcomes:targets({question:uuid.optional(),book:uuid.optional(),manage:uuid.optional(),inquiry:uuid.optional(),human:uuid,unknown:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Answer'),settings:z.strictObject({faqIds:z.array(uuid).max(50),publicTopics:z.array(z.enum(['contact','address','policy','hours','services'])).max(5),fallbackCopy:copy}),outcomes:targets({answered:uuid,unknown:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Availability'),settings:z.strictObject({allowedServiceIds:serviceIds,resourceChoice:z.enum(['any','preferred']),maxOptions:z.int().min(1).max(3)}),outcomes:targets({selected:uuid,none:uuid,error:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Book'),settings:z.strictObject({allowedServiceIds:serviceIds,readbackIntro:optionalCopy.optional(),failureCopy:optionalCopy.optional()}),outcomes:targets({confirmed:uuid,conflict:uuid,rejected:uuid,error:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Contact'),settings:z.strictObject({requireName:z.literal(true),contactRequirement:z.enum(['phone','email','either']),retryCopy:optionalCopy.optional(),criticalFieldReadback:z.literal(true)}),outcomes:targets({collected:uuid,declined:uuid,failed:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Inquiry'),settings:z.strictObject({summaryPrompt:copy,includeCustomAnswers:z.boolean(),submissionIntro:optionalCopy.optional()}),outcomes:targets({recorded:uuid,declined:uuid,error:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Human'),settings:z.strictObject({callbackOffer:copy,publicContactFallback:copy}),outcomes:targets({recorded:uuid,declined:uuid,unavailable:uuid})}),
+ z.strictObject({...blockBase,kind:z.literal('Finish'),settings:z.strictObject({closingCopy:copy,includeReceipt:z.boolean(),allowNewRequest:z.boolean()}),outcomes:targets({new_request:uuid.optional()})})
+]);
+export const flowDefinition = z.strictObject({schemaVersion:z.literal(1),entryBlockId:uuid,maxTransitions:z.literal(30),blocks:z.array(flowBlock).min(1).max(30)});
+export const conversationPolicy = z.strictObject({allowBooking:z.boolean(),allowManagement:z.boolean(),approvedServiceIds:z.array(uuid).max(100),contactRequirement:z.enum(['phone','email','either']),neverPromise:z.array(z.enum(['availability_before_commit','other_customer_details','guaranteed_callback_time'])).max(3),customGuidance:z.string().max(2000)});
+export const conversationContent = z.strictObject({faqs:z.array(faq).max(50),publicEmail:z.string().max(254).nullable(),publicPhone:z.string().max(40).nullable(),publicAddress:z.string().max(500).nullable(),publicDescription:z.string().max(2000)});
+export const conversationConfig = z.strictObject({flow:flowDefinition,policy:conversationPolicy,content:conversationContent});
+export type FlowBlock = z.infer<typeof flowBlock>;
+export type ConversationConfig = z.infer<typeof conversationConfig>;
+const changeBase={op:z.enum(['set','clear']),evidence:z.string().min(1).max(500)};
+export const slotChange=z.discriminatedUnion('key',[
+ z.strictObject({...changeBase,key:z.literal('service_id'),value:uuid.optional()}),z.strictObject({...changeBase,key:z.literal('resource_id'),value:uuid.optional()}),
+ z.strictObject({...changeBase,key:z.literal('preferred_date'),value:localDate.optional()}),z.strictObject({...changeBase,key:z.literal('starts_at'),value:z.iso.datetime({offset:true}).optional()}),
+ z.strictObject({...changeBase,key:z.literal('name'),value:z.string().trim().min(1).max(100).optional()}),z.strictObject({...changeBase,key:z.literal('phone'),value:z.string().regex(/^[+][1-9]\d{7,14}$/).optional()}),
+ z.strictObject({...changeBase,key:z.literal('email'),value:email.optional()}),z.strictObject({...changeBase,key:z.literal('inquiry_summary'),value:z.string().trim().min(1).max(2000).optional()}),
+ z.strictObject({...changeBase,key:z.literal('custom_answer'),blockId:uuid,value:z.string().trim().min(1).max(500).optional()})
+]).refine(v=>v.op==='set'?v.value!==undefined:v.value===undefined,'Set needs a value; clear must omit it');
+const contactArgs={name:z.string().trim().min(1).max(100),phone:z.string().regex(/^[+][1-9]\d{7,14}$/).nullable(),email:email.nullable()};
+export const requestedOperation=z.discriminatedUnion('type',[
+ z.strictObject({type:z.literal('get_business_details'),topic:z.enum(['contact','address','policy'])}),z.strictObject({type:z.literal('get_services'),query:z.string().max(100).optional()}),
+ z.strictObject({type:z.literal('get_business_hours'),date:localDate.optional()}),z.strictObject({type:z.literal('find_resources'),service_id:uuid}),
+ z.strictObject({type:z.literal('check_availability'),service_id:uuid,from:localDate,to:localDate,resource_id:uuid.optional()}).refine(v=>v.from<=v.to&&(Date.parse(v.to)-Date.parse(v.from))<7*86400000),
+ z.strictObject({type:z.literal('find_appointment'),verified_appointment_handle:uuid}),
+ z.strictObject({type:z.literal('prepare_appointment'),service_id:uuid,resource_id:uuid,starts_at:z.iso.datetime({offset:true}),...contactArgs}),
+ z.strictObject({type:z.literal('prepare_reschedule'),verified_appointment_handle:uuid,starts_at:z.iso.datetime({offset:true}),resource_id:uuid.optional()}),
+ z.strictObject({type:z.literal('prepare_cancellation'),verified_appointment_handle:uuid}),
+ z.strictObject({type:z.literal('prepare_inquiry'),...contactArgs,summary:z.string().trim().min(1).max(2000),inquiryType:z.enum(['lead','callback'])})
+]);
+export const submitTurn=z.strictObject({intent:z.enum(['question','book','manage','inquiry','human','finish','correction','unknown']),slot_changes:z.array(slotChange).max(8),requested_operation:requestedOperation.nullable(),question_text:z.string().max(500).nullable(),uncertain_fields:z.array(slotKey).max(8)});
+export type SubmitTurn=z.infer<typeof submitTurn>;
+export const turnEnvelope=z.strictObject({event_id:uuid,session_id:uuid,input_turn_id:uuid,expected_state_revision:revision,provider_response_id:z.string().min(1).max(100),provider_function_call_id:z.string().min(1).max(100)});
+export type TurnEnvelope=z.infer<typeof turnEnvelope>;
+export const snapshotInput=z.strictObject({draftId:uuid,revision});
+export const sessionInput=z.strictObject({businessId:uuid,testSnapshotId:uuid,mode:z.enum(['preview','real_test']),transport:z.literal('simulator'),acknowledgeRealActions:z.boolean().default(false)});
+export const simulatorTurn=z.strictObject({expectedStateRevision:revision,text:z.string().trim().min(1).max(2000),interpretation:submitTurn.optional()});

@@ -1,5 +1,11 @@
 # Progress
 
+## Phase 3 — In progress (2026-10-24)
+
+The user authorized Phase 3 and requested strict adherence to the docs and all checks. Sequence: implement and prove the fixed booking core first; record the Phase 3V checkpoint outcome; continue the offline complete engine and owner text preview; then run the relevant service, browser, startup and build gates in sequence. The local environment contains no provider credential or LIVE_AI_ENABLED setting. Live feasibility therefore remains gated by the documented operator enablement/balance/project-limit requirements; offline engine work can continue, and no live-checkpoint success will be claimed without live evidence.
+
+Core checkpoint: fresh migration verified 22 tables and the appointment exclusion constraint. All five fixed-core PostgreSQL scenarios passed: genuine booking only after full read-back, stale/changed-mind rejection, exact whole-turn grammar and interrupted read-back, pre-commit rollback/after-commit lost-response replay, immutable unpublished snapshot selection and tenant isolation. Receipt persistence precedes success output in the recorded event sequence. Phase 3V live outcome: NOT RUN — no operator live enablement/provider account configuration exists here. No API call or AI spend was made. This remains a live-integration blocker; the documented permission to continue offline engine work is being used for the remaining Phase 3 engine/preview.
+
 ## Phase 2 — Complete for local development (office Windows machine, 2026-10-24)
 
 Authorized by the user. Docker Desktop PostgreSQL 17 was pulled and started healthy with the project Compose volume and localhost-only port. Node 24.21.0 is installed. PowerShell blocks npm.ps1, so commands use npm.cmd. Startup now invokes npm through its JavaScript entry point on Windows; migration paths use fileURLToPath; Chrome selection is portable. The local .env has a new random authentication hash key and is ignored by Git. Docker, Fastify and Next.js are running at http://localhost:3000 following the final restart.

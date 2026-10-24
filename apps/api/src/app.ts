@@ -8,6 +8,7 @@ import { registerBusinessRoutes } from './businesses/routes.js';
 import { registerOperationsRoutes } from './catalog/routes.js';
 import { registerPublicRoutes } from './actions/public-routes.js';
 import { expireProposals } from './actions/service.js';
+import { registerConversationRoutes } from './conversation/routes.js';
 
 export async function buildApp(db: Db, env: Env) {
   const app = Fastify({ logger: env.NODE_ENV === 'test' ? false : { redact: ['req.headers.cookie', 'req.headers.authorization', 'req.headers.x-csrf-token', 'req.headers.x-management-handle', 'res.headers.set-cookie'] }, trustProxy: false });
@@ -28,5 +29,6 @@ export async function buildApp(db: Db, env: Env) {
   registerBusinessRoutes(app, db, env);
   registerOperationsRoutes(app, db, env);
   registerPublicRoutes(app, db, env);
+  registerConversationRoutes(app, db, env);
   return app;
 }

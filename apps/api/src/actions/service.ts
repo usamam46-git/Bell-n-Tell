@@ -7,7 +7,7 @@ import { keyedHash, randomSecret } from '../auth/crypto.js';
 import { HttpError } from '../http.js';
 import { audit, lockPolicy, loadSchedule, one, required, slot, displayTime, type Executor, type Appointment, type Policy } from '../scheduling/service.js';
 
-export type Actor = {kind:'owner'|'form'|'management';id:string;appointmentId?:string;owner?:boolean};
+export type Actor = {kind:'owner'|'form'|'management'|'session';id:string;appointmentId?:string;owner?:boolean;sessionId?:string;stateRevision?:number;source?:'voice'|'owner_test';credentialHash?:string;proofExpiresAt?:number;confirmationEvidence?:Record<string,unknown>};
 export type Payload = z.infer<typeof proposalInput>;
 export type Receipt = {actionReceiptId:string;committedAt:string;recordId:string;revision:number;kind:string;bookingRef?:string};
 export type Proposal = {id:string;businessId:string;revision:number;actorKind:string;actorId:string;kind:string;payload:Payload;payloadHash:string;schedulingRevision:number|null;appointmentId:string|null;appointmentRevision:number|null;expiresAt:Date;status:string;result:Receipt|null;committedAt:Date|null};
@@ -38,7 +38,7 @@ export async function prepareTx(tx:Executor,env:Env,b:string,actor:Actor,key:str
  if(existing){sameActor(existing,actor);checkKey(existing,hash.payloadHash);usable(existing);return existing;}
  let appointment:Appointment|undefined;
  if(input.kind==='reschedule'||input.kind==='cancel') {
-  if(actor.kind==='management'&&actor.appointmentId!==input.appointmentId)throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Appointment verification required');
+  if(['management','session'].includes(actor.kind)&&actor.appointmentId!==input.appointmentId)throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Appointment verification required');
   appointment=required(await one<Appointment>(tx,sql`select * from appointments where business_id=${b} and id=${input.appointmentId}`));
   if(appointment.revision!==input.appointmentRevision)throw new HttpError(409,'STALE_PROPOSAL','Appointment changed; reload before reviewing');
   cutoff(appointment,policy,actor,input);
@@ -47,7 +47,7 @@ export async function prepareTx(tx:Executor,env:Env,b:string,actor:Actor,key:str
   const schedule=await loadSchedule(tx,b);
   slot(schedule,input.kind==='book'?input.serviceId:appointment!.serviceId,input.resourceId,new Date(input.startsAt),new Date(),appointment?.id,appointment?.durationMinutes);
  }
- return required(await one<Proposal>(tx,sql`insert into action_proposals (business_id,actor_kind,actor_id,kind,payload,payload_hash,request_key,scheduling_revision,appointment_id,appointment_revision,expires_at) values (${b},${actor.kind},${actor.id},${input.kind},${JSON.stringify(input)}::jsonb,${hash.payloadHash},${hash.requestKey},${input.kind==='inquiry'?null:policy.revision},${appointment?.id??null},${appointment?.revision??null},now()+interval '120 seconds') returning *`));
+ return required(await one<Proposal>(tx,sql`insert into action_proposals (business_id,actor_kind,actor_id,kind,payload,payload_hash,request_key,scheduling_revision,appointment_id,appointment_revision,voice_session_id,expected_state_revision,expires_at) values (${b},${actor.kind},${actor.id},${input.kind},${JSON.stringify(input)}::jsonb,${hash.payloadHash},${hash.requestKey},${input.kind==='inquiry'?null:policy.revision},${appointment?.id??null},${appointment?.revision??null},${actor.sessionId??null},${actor.stateRevision??null},now()+interval '120 seconds') returning *`));
 }
 export async function prepare(db:Db,env:Env,b:string,actor:Actor,key:string,input:Payload) {
  return db.transaction(async tx=>prepareTx(tx,env,b,actor,key,input,await lockPolicy(tx,b)));
@@ -79,22 +79,28 @@ export async function confirmTx(tx:Executor,env:Env,b:string,actor:Actor,id:stri
   return {receipt:required(p.result??undefined)};
  }
  usable(p);
+ if(actor.kind==='session'){
+  if(!actor.confirmationEvidence||actor.sessionId!==actor.id)throw new HttpError(409,'CONFIRMATION_REQUIRED','Controller confirmation is required');
+  const bound=await one<{expectedStateRevision:number;voiceSessionId:string}>(tx,sql`select expected_state_revision,voice_session_id from action_proposals where business_id=${b} and id=${id}`);
+  if(bound?.voiceSessionId!==actor.sessionId||bound.expectedStateRevision!==actor.stateRevision)throw new HttpError(409,'STALE_PROPOSAL','Conversation changed; review a new proposal');
+ }
  if(p.revision!==revision)throw new HttpError(409,'STALE_PROPOSAL','Proposal changed; review it again');
  if(p.schedulingRevision!==null&&p.schedulingRevision!==policy.revision)throw new HttpError(409,'STALE_PROPOSAL','Scheduling settings changed; review a new proposal');
  const input=p.payload;let recordId:string;let recordRevision=1;let managementToken:string|undefined;let bookingRef:string|undefined;
  if(input.kind==='book'||input.kind==='inquiry') {
   const customer=required(await one<{id:string}>(tx,sql`insert into customers (business_id,name,phone_e164,email) values (${b},${input.contact.name},${input.contact.phone},${input.contact.email}) returning id`));
   if(input.kind==='inquiry') {
-   recordId=required(await one<{id:string}>(tx,sql`insert into inquiries (business_id,customer_id,type,summary,source,consent_version) values (${b},${customer.id},${input.type},${input.summary},${actor.kind==='form'?'form':'owner'},${input.consentVersion}) returning id`)).id;
+   recordId=required(await one<{id:string}>(tx,sql`insert into inquiries (business_id,customer_id,type,summary,source,consent_version,voice_session_id) values (${b},${customer.id},${input.type},${input.summary},${actor.kind==='form'?'form':actor.kind==='session'?'voice':'owner'},${input.consentVersion},${actor.sessionId??null}) returning id`)).id;
   } else {
    const schedule=await loadSchedule(tx,b);const {service,end}=slot(schedule,input.serviceId,input.resourceId,new Date(input.startsAt));
    managementToken=randomSecret();bookingRef=randomSecret().slice(0,16);
-   recordId=required(await one<{id:string}>(tx,sql`insert into appointments (business_id,customer_id,service_id,resource_id,starts_at,ends_at,timezone,service_name,duration_minutes,price_text,source,booking_ref,manage_token_hash) values (${b},${customer.id},${input.serviceId},${input.resourceId},${new Date(input.startsAt)},${end},${schedule.business.timezone},${service.name},${service.durationMinutes},${service.priceText},'owner',${bookingRef},${keyedHash(env.AUTH_HASH_KEY,'management',managementToken)}) returning id`)).id;
+   recordId=required(await one<{id:string}>(tx,sql`insert into appointments (business_id,customer_id,service_id,resource_id,starts_at,ends_at,timezone,service_name,duration_minutes,price_text,source,booking_ref,manage_token_hash) values (${b},${customer.id},${input.serviceId},${input.resourceId},${new Date(input.startsAt)},${end},${schedule.business.timezone},${service.name},${service.durationMinutes},${service.priceText},${actor.source??'owner'},${bookingRef},${keyedHash(env.AUTH_HASH_KEY,'management',managementToken)}) returning id`)).id;
   }
  } else {
   const appointment=required(await one<Appointment>(tx,sql`select * from appointments where business_id=${b} and id=${input.appointmentId} for update`));
   if(appointment.revision!==p.appointmentRevision)throw new HttpError(409,'STALE_PROPOSAL','Appointment changed; review a new proposal');
-  if(actor.kind==='management'&&actor.appointmentId!==appointment.id)throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Appointment verification required');
+  if(['management','session'].includes(actor.kind)&&actor.appointmentId!==appointment.id)throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Appointment verification required');
+  if(actor.kind==='session'&&(actor.credentialHash!==appointment.manageTokenHash||!actor.proofExpiresAt||actor.proofExpiresAt<Date.now()))throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Booking proof expired or was revoked');
   cutoff(appointment,policy,actor,input);
   if(input.kind==='reschedule') {
    const schedule=await loadSchedule(tx,b);const {end}=slot(schedule,appointment.serviceId,input.resourceId,new Date(input.startsAt),new Date(),appointment.id,appointment.durationMinutes);
@@ -103,7 +109,7 @@ export async function confirmTx(tx:Executor,env:Env,b:string,actor:Actor,id:stri
   recordId=appointment.id;recordRevision=appointment.revision+1;bookingRef=appointment.bookingRef;
  }
  const receipt:Receipt={actionReceiptId:p.id,committedAt:new Date().toISOString(),recordId,revision:recordRevision,kind:input.kind,...(bookingRef?{bookingRef}:{})};
- await tx.execute(sql`update action_proposals set status='committed',result=${JSON.stringify(receipt)}::jsonb,confirmation=${JSON.stringify({actorKind:actor.kind,actorId:actor.id,proposalRevision:revision,method:actor.kind==='form'?'explicit-form-submit':'explicit-browser-confirm',at:receipt.committedAt})}::jsonb,committed_at=now() where business_id=${b} and id=${p.id}`);
+ await tx.execute(sql`update action_proposals set status='committed',result=${JSON.stringify(receipt)}::jsonb,confirmation=${JSON.stringify({actorKind:actor.kind,actorId:actor.id,proposalRevision:revision,method:actor.kind==='form'?'explicit-form-submit':'explicit-browser-confirm',...actor.confirmationEvidence,at:receipt.committedAt})}::jsonb,committed_at=now() where business_id=${b} and id=${p.id}`);
  await audit(tx,b,actor.kind,actor.id,input.kind,input.kind==='inquiry'?'inquiry':'appointment',recordId,{'proposalId':p.id,...('overrideReason' in input&&input.overrideReason?{overrideReason:input.overrideReason}:{})});
  return {receipt,...(managementToken?{managementToken}:{})};
 }
