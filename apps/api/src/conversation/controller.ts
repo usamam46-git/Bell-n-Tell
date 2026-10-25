@@ -6,9 +6,9 @@ import type {Env} from '../env.js';
 import {HttpError} from '../http.js';
 import {keyedHash,randomSecret,safeEqual} from '../auth/crypto.js';
 import {consumeProofThrottle} from '../auth/throttle.js';
-import {prepareTx,confirmTx,proposalView,type Actor,type Payload,type Proposal} from '../actions/service.js';
+import {prepareTx,confirmTx,proposalView,type Actor,type Proposal} from '../actions/service.js';
 import {one,rows,required,lockPolicy,loadSchedule,type Executor,type Appointment} from '../scheduling/service.js';
-import {configOf,redact,confirmation,type Session,type Version,type EngineState,type Pending,type ActionReceipt} from './contracts.js';
+import {configOf,redact,confirmation,type Session,type Version,type ActionReceipt} from './contracts.js';
 import {loadVersion} from './configuration.js';
 import {initialState,drive,interpret,current,fallback,afterCommit,textInterpretation,responseId,type Gateway} from './engine.js';
 import {checksum,validateConfig} from './validator.js';
@@ -67,7 +67,7 @@ async function commitPending(tx:Executor,env:Env,s:Session,v:Version,proposalId:
  s.engineState.directive=result.receipt.label+'. '+s.engineState.directive;
  await message(tx,s,'system','',{event:'action_completed',receipt:result.receipt});return result;
 }
-export async function processTurn(db:Db,env:Env,b:string,envelope:TurnEnvelope,text:string,input?:SubmitTurn,options:{completeTextReadback?:boolean;hooks?:Hooks}={}){
+export async function processTurn(db:Db,env:Env,b:string,envelope:TurnEnvelope,text:string,input?:SubmitTurn,options:{completeTextReadback?:boolean;source?:'voice';hooks?:Hooks}={}){
  const e=turnEnvelope.parse(envelope);const cleanText=redact(text);
  const result=await db.transaction(async tx=>{
   const s=await lockedSession(tx,b,e.session_id);const v=await loadVersion(tx,b,s.configVersionId);
@@ -81,7 +81,7 @@ export async function processTurn(db:Db,env:Env,b:string,envelope:TurnEnvelope,t
    const decision=confirmation(cleanText);
    if(cleanText!==text){await rejectPending(tx,env,s,v);s.engineState.directive='Private codes must be entered in the secure field, not in conversation text.';}
    else if(s.engineState.pending&&decision==='accept'){
-    const p=s.engineState.pending;const committed=await commitPending(tx,env,s,v,p.id,p.revision,s.stateRevision,'simulator',e.input_turn_id);privateToken=committed.managementToken;
+    const p=s.engineState.pending;const committed=await commitPending(tx,env,s,v,p.id,p.revision,s.stateRevision,options.source??'simulator',e.input_turn_id);privateToken=committed.managementToken;
    }else if(s.engineState.pending&&decision==='reject'){
     const block=current(config,s.engineState);await rejectPending(tx,env,s,v);s.engineState.management=null;const target=block.kind==='Book'?block.outcomes.rejected:config.flow.blocks.find(x=>x.kind==='Finish')!.id;s.engineState.blockId=target;await drive(config,s.engineState,g,s.stateRevision+1);
    }else{

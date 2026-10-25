@@ -18,7 +18,7 @@ test('owner can register, create a business, save contact, sign out and sign in'
   await expect(page.getByText('Add services and hours')).toBeVisible();
   await page.getByLabel('Email', { exact: true }).fill('hello@example.test');
   await page.getByRole('button', { name: 'Save contact' }).click();
-  await expect(page.getByRole('status')).toContainText('Contact details saved');
+  await expect(page.getByRole('status').filter({hasText:'Contact details saved'})).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.getByLabel('Email', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);

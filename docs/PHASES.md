@@ -1,6 +1,6 @@
 ﻿# Dependency-aware implementation plan
 
-**Current state: Phases 1 and 2 implemented and locally verified by explicit user authorization. Later phases require a new user request.** The sequence below defines execution order and scope. Each milestone records changes, evidence, risks and next task in docs/PROGRESS.md; do not create application placeholders to satisfy this document.
+**Current state: Phases 1 and 2 implemented and locally verified; Phase 3 is authorized and in progress.** The offline engine, owner text preview and Phase 3V adapter fixtures have local evidence, but the required Phase 3V live voice checkpoint remains unverified. Later phases require a new user request. The sequence below defines execution order and scope. Each milestone records changes, evidence, risks and next task in docs/PROGRESS.md; do not create application placeholders to satisfy this document.
 
 ## Phase 0 — Planning and review
 

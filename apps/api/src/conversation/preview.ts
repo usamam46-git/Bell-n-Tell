@@ -4,14 +4,13 @@ import type {Executor,Appointment,Schedule} from '../scheduling/service.js';
 import {slot,displayTime} from '../scheduling/service.js';
 import {keyedHash,randomSecret,safeEqual} from '../auth/crypto.js';
 import {HttpError} from '../http.js';
-import type {Payload} from '../actions/service.js';
 import type {Gateway} from './engine.js';
 import {responseId} from './engine.js';
 import type {Session,Version,Pending,ActionReceipt} from './contracts.js';
 function restore(s:Session){for(const a of s.engineState.simulationAppointments){a.startsAt=new Date(a.startsAt);a.endsAt=new Date(a.endsAt);}}
 export async function previewGateway(_tx:Executor,_env:Env,s:Session,v:Version):Promise<Gateway>{
  restore(s);if(!v.testFixture)throw new HttpError(400,'CONFIG_INVALID','This snapshot has no simulation fixture');
- const schedule:Schedule=structuredClone(v.testFixture.schedule);schedule.busy=s.engineState.simulationAppointments.filter(a=>a.status==='confirmed').map(a=>({id:a.id,resourceId:a.resourceId,startsAt:a.startsAt,endsAt:a.endsAt}));
+ const schedule:Schedule=structuredClone(v.testFixture.schedule);schedule.busy=[...schedule.busy.map(a=>({...a,startsAt:new Date(a.startsAt),endsAt:new Date(a.endsAt)})),...s.engineState.simulationAppointments.filter(a=>a.status==='confirmed').map(a=>({id:a.id,resourceId:a.resourceId,startsAt:a.startsAt,endsAt:a.endsAt}))];
  const now=new Date(v.testFixture.now);
  async function verified(handle:string){const proof=s.engineState.proof;if(!proof||proof.handle!==handle||proof.expiresAt<Date.now())throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Verify the synthetic booking in this session');const a=s.engineState.simulationAppointments.find(a=>a.id===proof.appointmentId);if(!a||!safeEqual(a.manageTokenHash,proof.credential))throw new HttpError(403,'OWNERSHIP_UNVERIFIED','Synthetic booking proof was revoked');return a;}
  return {schedule,now,verified,invalidate:async p=>{delete s.engineState.simulationPayloads[p.id];},prepare:async(payload,revision)=>{

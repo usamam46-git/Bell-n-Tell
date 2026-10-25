@@ -1,0 +1,22 @@
+import {beforeAll,afterAll,it,expect} from 'vitest';
+import {sql} from 'drizzle-orm';
+import {conversationFixture} from './conversation-fixture.js';
+import {addDays,localParts,rows,one} from '../src/scheduling/service.js';
+import {createSession,browserConfirm,verifyAppointment} from '../src/conversation/controller.js';
+let f:Awaited<ReturnType<typeof conversationFixture>>;
+beforeAll(async()=>{f=await conversationFixture();});afterAll(async()=>{await f?.cleanup();});
+it('keeps preview bookings and inquiries synthetic and supports verified cancellation',async()=>{
+ const created=await createSession(f.db,f.env,f.business.id,f.user.id,f.selected.snapshot.id,'preview');let s=created.session;
+ const date=addDays(localParts(new Date(),'Asia/Karachi').date,5);const startsAt=`${date}T11:00:00+05:00`;
+ const booking=await f.send(s.id,s.stateRevision,`book ${f.service.id} ${f.resource.id} ${date} ${startsAt} Synthetic synthetic@example.test`,{intent:'book',slot_changes:[{key:'service_id',op:'set',value:f.service.id,evidence:f.service.id},{key:'resource_id',op:'set',value:f.resource.id,evidence:f.resource.id},{key:'preferred_date',op:'set',value:date,evidence:date},{key:'starts_at',op:'set',value:startsAt,evidence:startsAt},{key:'name',op:'set',value:'Synthetic',evidence:'Synthetic'},{key:'email',op:'set',value:'synthetic@example.test',evidence:'synthetic@example.test'}]});s=booking.session;
+ expect(s.pending?.simulated,JSON.stringify({directive:s.directive,block:s.block?.kind,slots:s.slots})).toBe(true);const confirmed=await browserConfirm(f.db,f.env,f.business.id,s.id,s.pending!.id,s.pending!.revision,s.pending!.stateRevision);s=confirmed.session;
+ expect(confirmed.receipt.simulated).toBe(true);expect(confirmed.receipt.label).toBe('Simulation — no appointment was created');expect(confirmed.managementToken).toBeTruthy();expect((await rows(f.db,sql`select id from appointments where business_id=${f.business.id}`))).toHaveLength(0);
+ s=(await verifyAppointment(f.db,f.env,f.business.id,s.id,confirmed.receipt.bookingRef!,confirmed.managementToken!,'127.0.0.10')).session;
+ s=(await f.send(s.id,s.stateRevision,'cancel this booking',{requested_operation:{type:'prepare_cancellation',verified_appointment_handle:s.proof!.handle}})).session;
+ expect(s.pending?.simulated).toBe(true);expect(s.pending?.readback).toContain('Cancel Consultation');
+ const cancelled=await browserConfirm(f.db,f.env,f.business.id,s.id,s.pending!.id,s.pending!.revision,s.pending!.stateRevision);expect(cancelled.receipt.kind).toBe('cancel');expect((await rows(f.db,sql`select id from appointments where business_id=${f.business.id}`))).toHaveLength(0);
+ const stored=await one<{engineState:{simulationAppointments:{status:string}[]}}>(f.db,sql`select engine_state from voice_sessions where business_id=${f.business.id} and id=${s.id}`);expect(stored!.engineState.simulationAppointments[0].status).toBe('cancelled');
+ const inquiry=await createSession(f.db,f.env,f.business.id,f.user.id,f.selected.snapshot.id,'preview');s=inquiry.session;
+ s=(await f.send(s.id,s.stateRevision,'inquiry Please call me about pricing Synthetic synthetic@example.test',{intent:'inquiry',slot_changes:[{key:'inquiry_summary',op:'set',value:'Please call me about pricing',evidence:'Please call me about pricing'},{key:'name',op:'set',value:'Synthetic',evidence:'Synthetic'},{key:'email',op:'set',value:'synthetic@example.test',evidence:'synthetic@example.test'}]})).session;
+ expect(s.pending?.simulated).toBe(true);const submitted=await browserConfirm(f.db,f.env,f.business.id,s.id,s.pending!.id,s.pending!.revision,s.pending!.stateRevision);expect(submitted.receipt.kind).toBe('inquiry');expect((await rows(f.db,sql`select id from inquiries where business_id=${f.business.id}`))).toHaveLength(0);
+});

@@ -69,7 +69,7 @@ export async function drive(config:ConversationConfig,state:EngineState,gateway:
 function same(value:string|undefined,other:string|null|undefined){return (value??null)===(other??null);}
 export async function interpret(config:ConversationConfig,state:EngineState,turn:SubmitTurn,text:string,gateway:Gateway,nextRevision:number){
  let original=current(config,state);
- if(original.kind==='Finish'){
+ if(original.kind==='Finish'&&!state.management){
   if(!original.settings.allowNewRequest||state.newRequests>=1||!['book','manage','inquiry'].includes(turn.intent)){state.directive=original.settings.closingCopy;return;}
   state.newRequests++;state.slots={};state.customAnswers={};state.proof=null;state.management=null;state.humanVisited=false;move(config,state,'new_request');original=current(config,state);
  }
@@ -95,7 +95,7 @@ export async function interpret(config:ConversationConfig,state:EngineState,turn
   state.resumeBlockId=null;state.blockId=answer.id;move(config,state,'unknown');await drive(config,state,gateway,nextRevision);state.directive=answer.settings.fallbackCopy+' '+state.directive;return;
  }
  const block=current(config,state);
- if(block.kind==='Understand'){
+ if(block.kind==='Understand'&&!state.management){
   if(!block.settings.enabledIntents.includes(turn.intent as 'book')||turn.intent==='unknown'){clarify(config,state,'intent',block.settings.clarificationCopy);return;}
   if(turn.intent==='manage'){if(!config.policy.allowManagement)throw new HttpError(403,'POLICY_DENIED','Appointment management is disabled');state.management=state.proof?'choose':'verify';}
   else if(turn.intent==='book'&&!config.policy.allowBooking)throw new HttpError(403,'POLICY_DENIED','Booking is disabled');

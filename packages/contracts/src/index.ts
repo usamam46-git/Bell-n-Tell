@@ -121,5 +121,5 @@ export type SubmitTurn=z.infer<typeof submitTurn>;
 export const turnEnvelope=z.strictObject({event_id:uuid,session_id:uuid,input_turn_id:uuid,expected_state_revision:revision,provider_response_id:z.string().min(1).max(100),provider_function_call_id:z.string().min(1).max(100)});
 export type TurnEnvelope=z.infer<typeof turnEnvelope>;
 export const snapshotInput=z.strictObject({draftId:uuid,revision});
-export const sessionInput=z.strictObject({businessId:uuid,testSnapshotId:uuid,mode:z.enum(['preview','real_test']),transport:z.literal('simulator'),acknowledgeRealActions:z.boolean().default(false)});
+export const sessionInput=z.strictObject({businessId:uuid,testSnapshotId:uuid,mode:z.enum(['preview','real_test']),transport:z.enum(['simulator','realtime']),acknowledgeRealActions:z.boolean().default(false),consentVersion:z.literal('owner-voice-test-v1').optional()}).refine(v=>v.transport==='simulator'||(v.mode==='real_test'&&v.acknowledgeRealActions&&!!v.consentVersion),'Live owner test requires real-action acknowledgement and voice consent');
 export const simulatorTurn=z.strictObject({expectedStateRevision:revision,text:z.string().trim().min(1).max(2000),interpretation:submitTurn.optional()});

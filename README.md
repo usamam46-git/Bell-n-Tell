@@ -1,6 +1,6 @@
 # BellnTell — Business operations
 
-Owner accounts, business setup, deterministic scheduling and a provider-independent contact form. Fastify owns authorization and business actions; PostgreSQL is the booking authority. Receptionist configuration, conversation, voice and billing are later milestones.
+Owner accounts, business setup, deterministic scheduling, a provider-independent contact form and an owner-only receptionist text preview. Fastify owns authorization and business actions; PostgreSQL is the booking authority. Voice, the visual builder and billing are later milestones.
 
 ## Local start
 
@@ -21,6 +21,14 @@ Open <http://localhost:3000>. Register, save the recovery code, create a busines
 Save the private management link shown once after booking. `/manage/<slug>` reads and immediately clears the token fragment, then verifies the private token through the API. Customers can review and confirm rescheduling/cancellation within the cutoff. Lost links require an owner to verify the customer offline and reissue a link with an audited reason. Retrying a committed confirmation returns its durable receipt without redisplaying the secret.
 
 The **Public contact form** link opens `/contact/<slug>`. It requires separate contact-processing consent and works with no AI keys or provider. The owner handles follow-up through **Inquiries**, with new/in_progress/resolved status and internal notes. Customers are never merged by matching phone/email. Owner lists currently show up to 100 records; API lists support cursors.
+
+After adding a service and hours, use **Receptionist text preview** on the owner dashboard. Load the current draft, start a pinned test snapshot, then choose a request and enter service/date/time or inquiry details. Review each synthetic action before confirming. Preview receipts say “Simulation — no appointment was created” and leave the real schedule untouched. A synthetic booking exposes a private token in the secure field for testing verification, rescheduling and cancellation. For a genuine owner test, the API has an explicit `real_test` mode that requires acknowledgement; the browser preview always uses synthetic mode. The Phase 3V live voice checkpoint has not run.
+
+## Bounded voice checkpoint setup
+
+The owner dashboard has a **Live voice feasibility test** below the text preview. It uses an unpublished test snapshot, records voice disclosure and real-action acknowledgement, and can make a real test booking. Live AI is disabled by default; ordinary tests and startup make no OpenAI requests.
+
+When ready for the supervised Phase 3V smoke, use a project API key with access to the selected Realtime model. Check available API credit and configure a project hard spend limit in the OpenAI Platform. In this repository's ignored local [`.env`](.env) file, add `OPENAI_API_KEY=your-project-key` and set `LIVE_AI_ENABLED=true`; keep `OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini` for the documented rate guard. Restart `npm run dev`. Never put the key in `.env.example`, browser code, a URL, Git, or chat. The first live session is limited to 45 seconds, one call at a time, with a $1 application lifetime guard. Provider hard-limit enforcement can lag; verify the project's actual balance/usage after the call. If final usage or termination is uncertain, the server blocks further live admission until operator reconciliation. The checkpoint has not passed until normal confirmation, interruption, server hangup and usage are observed live.
 
 All displayed booking times use the business timezone. Defaults: 30-minute service, 15-minute slot spacing, 60-minute notice, 60-day horizon, 24-hour management cutoff, zero buffer. Split overnight hours across days; use `24:00` only as an end. Business date exceptions replace weekly hours; resource exceptions can only restrict those hours. Owners can override the management cutoff with a reason, never overlap or closed hours. Future confirmed appointments block timezone changes. Outside bookings must be entered here or use exclusively allocated times; external calendars are not synchronized.
 
