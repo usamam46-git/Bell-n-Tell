@@ -19,10 +19,10 @@ const string=(value:unknown)=>typeof value==='string'?value:'';
 // The shared Zod contract remains the final validator after this provider-facing schema.
 const interpretationSchema={type:'object',additionalProperties:false,properties:{intent:{type:'string',enum:['question','book','manage','inquiry','human','finish','correction','unknown']},slot_changes:{type:'array',maxItems:8,items:{type:'object',additionalProperties:false,properties:{key:{type:'string',enum:['service_id','resource_id','preferred_date','starts_at','name','phone','email','inquiry_summary']},op:{type:'string',enum:['set','clear']},value:{type:'string'},evidence:{type:'string'}},required:['key','op','evidence']}},requested_operation:{type:'null'},question_text:{type:['string','null']},uncertain_fields:{type:'array',maxItems:8,items:{type:'string',enum:['service_id','resource_id','preferred_date','starts_at','name','phone','email','inquiry_summary']}}},required:['intent','slot_changes','requested_operation','question_text','uncertain_fields']} as const;
 export class VoiceController{
- private readyResolve?:()=>void;private readyReject?:(error:Error)=>void;private finalResolve?:()=>void;private finalSeen=false;private queue=Promise.resolve();private speaking=false;private activeResponseId='';private readbackResponseId='';private readbackText='';private readbackTranscript='';private readbackDone=false;private queuedInput:null|{itemId:string;text:string}=null;private inflight:null|{itemId:string;text:string;revision:number;responseId:string;stale:boolean}=null;private pendingTool:null|{responseId:string;callId:string;arguments:string}=null;private responses=0;private responsesDone=0;private missingUsage=false;private turns=0;private lastInput=Date.now();private stopped=false;
+ private readyResolve?:()=>void;private readyReject?:(error:Error)=>void;private finalResolve?:()=>void;private finalSeen=false;private queue=Promise.resolve();private speaking=false;private activeResponseId='';private readbackResponseId='';private readbackText='';private readbackTranscript='';private readbackDone=false;private queuedInput:null|{itemId:string;text:string}=null;private inflight:null|{itemId:string;text:string;revision:number;responseId:string;stale:boolean}=null;private pendingTool:null|{responseId:string;callId:string;arguments:string}=null;private responses=0;private responsesDone=0;private missingUsage=false;private turns=0;private lastInput=Date.now();private stopped=false;private terminating=false;
  constructor(private db:Db,private env:Env,private businessId:string,private sessionId:string,private sideband:Sideband,private terminate:(reason:string)=>Promise<void>){
-  sideband.onEvent(value=>{this.queue=this.queue.then(()=>this.receive(object(value))).catch(error=>this.terminate(`sideband_event_failure_${error instanceof HttpError?error.code:error instanceof ZodError?`schema_${error.issues[0]?.path.join('_')??'unknown'}`:error instanceof Error?error.name:'unknown'}`));});
-  sideband.onClose(()=>{if(!this.stopped)void this.terminate('sideband_closed');});
+  sideband.onEvent(value=>{this.queue=this.queue.then(()=>this.receive(object(value))).catch(error=>{if(this.terminating)return;this.terminating=true;return this.terminate(`sideband_event_failure_${error instanceof HttpError?error.code:error instanceof ZodError?`schema_${error.issues[0]?.path.join('_')??'unknown'}`:error instanceof Error?error.name:'unknown'}`);});});
+  sideband.onClose(()=>{if(!this.stopped&&!this.terminating){this.terminating=true;void this.terminate('sideband_closed');}});
  }
  async configure(){
   const ready=new Promise<void>((resolve,reject)=>{this.readyResolve=resolve;this.readyReject=reject;});
@@ -42,9 +42,9 @@ export class VoiceController{
   this.speak(result.session.directive);
  }
  private async receive(event:Event){
-  if(this.stopped)return;const type=string(event.type);
+  if(this.stopped||this.terminating)return;const type=string(event.type);
   if(type==='session.updated'){const session=object(event.session);const audio=object(session.audio);const input=object(audio.input);const detection=object(input.turn_detection);if(detection.create_response===false&&detection.interrupt_response===true)this.readyResolve?.();else this.readyReject?.(Error('Provider ignored server-controlled VAD'));return;}
-  if(type==='error'){this.readyReject?.(Error('Provider session setup failed'));await this.terminate('provider_error');return;}
+  if(type==='error'){this.readyReject?.(Error('Provider session setup failed'));this.terminating=true;await this.terminate('provider_error');return;}
   if(type==='input_audio_buffer.speech_started'){
    this.lastInput=Date.now();if(this.readbackResponseId&&!this.readbackDone){const s=await this.state();const p=s.engineState.pending;if(p)await playbackEvent(this.db,this.env,this.businessId,this.sessionId,p.responseId,'interrupted',this.readbackTranscript,false);}
    return;

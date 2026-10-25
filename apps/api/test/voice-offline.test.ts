@@ -24,9 +24,11 @@ describe('offline voice provider and accounting',()=>{
   expect(()=>responseCost({input_tokens:1,output_tokens:0})).toThrow();expect(transcriptionCost({type:'duration',seconds:60})).toBe(0.0045);expect(()=>transcriptionCost({type:'tokens',input_tokens:5})).toThrow();
  });
  it('keeps live admission disabled without a key and conservatively retains unknown usage after a fake call',async()=>{
-  await expect(admitLiveOwnerTest(f.db,f.env,f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1')).rejects.toMatchObject({code:'LIVE_AI_DISABLED'});
-  await f.db.execute(sql`update businesses set status='active' where id=${f.business.id}`);
+  await expect(admitLiveOwnerTest(f.db,{...f.env,LIVE_AI_ENABLED:false,OPENAI_API_KEY:undefined},f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1')).rejects.toMatchObject({code:'LIVE_AI_DISABLED'});
   const env={...f.env,LIVE_AI_ENABLED:true,OPENAI_API_KEY:'sk-offline-fixture-credential'};
+  await f.db.execute(sql`update businesses set status='paused' where id=${f.business.id}`);
+  await expect(admitLiveOwnerTest(f.db,env,f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1')).rejects.toMatchObject({code:'POLICY_DENIED'});
+  await f.db.execute(sql`update businesses set status='setup' where id=${f.business.id}`);
   let onEvent=(value:unknown)=>{void value;},onClose=()=>{};const emitted:unknown[]=[];let creates=0,hangups=0,failHangup=false;
   const sideband:Sideband={send:event=>{emitted.push(event);if((event as {type:string}).type==='session.update')queueMicrotask(()=>onEvent({type:'session.updated',session:{audio:{input:{turn_detection:{create_response:false,interrupt_response:true}}}}}));},close:()=>onClose(),onEvent:handler=>{onEvent=handler;},onClose:handler=>{onClose=handler;}};
   const provider:RealtimeProvider={createCall:async()=>{creates++;return {callId:'rtc_offline',answerSdp:'v=0\r\nanswer'};},attach:async()=>sideband,hangup:async()=>{hangups++;if(failHangup)throw Error('offline hangup failure');onEvent({type:'session.closed'});}};

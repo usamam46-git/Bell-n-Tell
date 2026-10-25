@@ -34,8 +34,8 @@ export function registerConversationRoutes(app:FastifyInstance,db:Db,env:Env,voi
  }
  for(const path of ['/api/v1/simulations','/api/v1/voice-sessions'])app.post(path,async request=>{
   const input=parseBody(sessionInput,request.body);if(path.endsWith('simulations')&&(input.mode!=='preview'||input.transport!=='simulator'))throw new HttpError(400,'VALIDATION_ERROR','Simulations must use preview mode');
-  const auth=await authContext(request,db,env);requireCsrf(request,env,auth);const membership=await one(db,sql`select business_id from business_memberships where business_id=${input.businessId} and user_id=${auth.user.id} and status='active' and role in ('owner','manager')`);required(membership);requireKey(request);
-  if(input.transport==='realtime'){if(!voice.reconciled)throw new HttpError(503,'TEMPORARILY_UNAVAILABLE','Live call recovery has not completed');return admitLiveOwnerTest(db,env,input.businessId,auth.user.id,input.testSnapshotId,input.consentVersion!);}
+  const auth=await authContext(request,db,env);requireCsrf(request,env,auth);const membership=required(await one<{role:string}>(db,sql`select role from business_memberships where business_id=${input.businessId} and user_id=${auth.user.id} and status='active' and role in ('owner','manager')`));requireKey(request);
+  if(input.transport==='realtime'){if(membership.role!=='owner')throw new HttpError(403,'ROLE_REQUIRED','Only the owner can run the paid voice test');if(!voice.reconciled)throw new HttpError(503,'TEMPORARILY_UNAVAILABLE','Live call recovery has not completed');return admitLiveOwnerTest(db,env,input.businessId,auth.user.id,input.testSnapshotId,input.consentVersion!);}
   return createSession(db,env,input.businessId,auth.user.id,input.testSnapshotId,input.mode,input.acknowledgeRealActions,requireKey(request));
  });
  for(const prefix of ['/api/v1/simulations/:id','/api/v1/voice-sessions/:id']){

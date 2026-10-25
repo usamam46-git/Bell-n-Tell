@@ -66,7 +66,7 @@ export class VoiceLifecycle{
  private async unknown(b:string,id:string){await this.db.execute(sql`update voice_sessions set status='termination_unknown' where business_id=${b} and id=${id}`);}
  private async watchdog(){
   for(const c of this.controllers.values())c.watchdog();
-  const rows=await this.db.execute(sql`select s.business_id,s.id from voice_sessions s join businesses b on b.id=s.business_id where s.transport='realtime' and s.status in ('admitted','connecting','active') and (s.max_end_at<now() or b.status<>'active' or (s.status='active' and s.heartbeat_at<now()-interval '15 seconds') or (s.status='admitted' and s.admission_expires_at<now()))`);
+  const rows=await this.db.execute(sql`select s.business_id,s.id from voice_sessions s join businesses b on b.id=s.business_id where s.transport='realtime' and s.status in ('admitted','connecting','active') and (s.max_end_at<now() or b.status='paused' or (s.status='active' and s.heartbeat_at<now()-interval '15 seconds') or (s.status='admitted' and s.admission_expires_at<now()))`);
   for(const row of rows.rows as {business_id:string;id:string}[])await this.end(row.business_id,row.id,'watchdog').catch(()=>{});
  }
 }
