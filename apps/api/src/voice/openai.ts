@@ -20,7 +20,7 @@ export class OpenAIRealtimeProvider implements RealtimeProvider{
  private key(){if(!this.env.OPENAI_API_KEY)throw new HttpError(503,'LIVE_AI_DISABLED','Provider credential is unavailable');return this.env.OPENAI_API_KEY;}
  async createCall(offerSdp:string,safetyId:string):Promise<ProviderCall>{
   if(!this.env.LIVE_AI_ENABLED)throw new HttpError(503,'LIVE_AI_DISABLED','Live AI is not enabled');
-  const data=new FormData();data.set('sdp',offerSdp);data.set('session',JSON.stringify({type:'realtime',model:this.env.OPENAI_REALTIME_MODEL,audio:{output:{voice:'marin'},input:{transcription:{model:'gpt-transcribe'},turn_detection:{type:'server_vad',create_response:false,interrupt_response:true}}},tools:[],tool_choice:'none',max_output_tokens:256}));
+  const data=new FormData();data.set('sdp',offerSdp);data.set('session',JSON.stringify({type:'realtime',model:this.env.OPENAI_REALTIME_MODEL,audio:{output:{voice:'marin'},input:{transcription:{model:'gpt-transcribe'},turn_detection:{type:'server_vad',create_response:false,interrupt_response:true}}},tools:[],tool_choice:'none',max_output_tokens:1024}));
   let response:Response;
   try{response=await this.request(endpoint,{method:'POST',headers:{Authorization:`Bearer ${this.key()}`,'OpenAI-Safety-Identifier':safetyId},body:data,signal:AbortSignal.timeout(15000)});}catch{throw new HttpError(503,'PROVIDER_SETUP_UNKNOWN','Provider setup did not return a confirmed result');}
   if(!response.ok)throw new HttpError(503,'PROVIDER_UNAVAILABLE',`Provider rejected call setup (${response.status})`);

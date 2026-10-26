@@ -1,21 +1,41 @@
 import {beforeAll,afterAll,describe,it,expect,vi} from 'vitest';
 import {sql} from 'drizzle-orm';
+import {submitTurn} from '@bellntell/contracts';
 import {conversationFixture} from './conversation-fixture.js';
 import {admitLiveOwnerTest} from '../src/voice/admission.js';
 import {VoiceLifecycle} from '../src/voice/lifecycle.js';
 import {callIdFromLocation,OpenAIRealtimeProvider,type RealtimeProvider,type Sideband} from '../src/voice/openai.js';
 import {responseCost,transcriptionCost,persistUsage} from '../src/voice/usage.js';
+import {reconcileProviderSpend} from '../src/voice/reconciliation.js';
+import {explicitBookingTurn,explicitContactTurn,supportedVoiceEvidence} from '../src/voice/controller.js';
+import {loadSchedule} from '../src/scheduling/service.js';
+import {configOf} from '../src/conversation/contracts.js';
+import {initialState} from '../src/conversation/engine.js';
 import {one,addDays,localParts} from '../src/scheduling/service.js';
 let f:Awaited<ReturnType<typeof conversationFixture>>;
 beforeAll(async()=>{f=await conversationFixture();});afterAll(async()=>{await f?.cleanup();});
 
 describe('offline voice provider and accounting',()=>{
+ it('grounds spoken catalog, date and time values and drops unsupported claims',async()=>{
+  const schedule=await loadSchedule(f.db,f.business.id),config=configOf(f.draft),state=initialState(config);
+  const result=supportedVoiceEvidence({intent:'book',slot_changes:[{key:'service_id',op:'set',value:f.service.id,evidence:'the service'},{key:'resource_id',op:'set',value:f.resource.id,evidence:'the resource'},{key:'preferred_date',op:'set',value:'2026-11-01',evidence:'November first'},{key:'starts_at',op:'set',value:'2026-11-01T11:00:00+05:00',evidence:'eleven in the morning'},{key:'email',op:'set',value:'someone@example.test',evidence:'someone@example.test'}],requested_operation:null,question_text:null,uncertain_fields:[]},'Book a Consultation with Consultant on November 1st, 2026 at 11 a.m.',schedule,config,state);
+  expect(result.rejectedKeys).toEqual(['email']);expect(result.turn.slot_changes.map(change=>change.key)).toEqual(['service_id','resource_id','preferred_date','starts_at']);
+  expect(result.turn.slot_changes.map(change=>change.evidence)).toEqual(['Consultation','Consultant','November 1st, 2026','11 a.m.']);
+  const email=supportedVoiceEvidence({intent:'unknown',slot_changes:[{key:'email',op:'set',value:'alice@example.com',evidence:'alice@example.com'}],requested_operation:null,question_text:null,uncertain_fields:[]},'My email is alice at example dot com.',schedule,config,state);expect(email.rejectedKeys).toEqual([]);expect(email.turn.slot_changes[0].evidence).toBe('alice at example dot com');
+  const name=supportedVoiceEvidence({intent:'book',slot_changes:[{key:'name',op:'set',value:'Alice Smith',evidence:'the customer'}],requested_operation:null,question_text:null,uncertain_fields:[]},'My name is Alice Smith. My email is alice at example dot com.',schedule,config,state);expect(name.rejectedKeys).toEqual([]);expect(name.turn.slot_changes[0].evidence).toBe('Alice Smith');
+  const invented=supportedVoiceEvidence({intent:'book',slot_changes:[{key:'name',op:'set',value:'Alice Jones',evidence:'Alice'}],requested_operation:null,question_text:null,uncertain_fields:[]},'My name is Alice Smith.',schedule,config,state);expect(invented.rejectedKeys).toEqual(['name']);
+  expect(explicitContactTurn('My name is Alice Smith. My email is alice at example dot com.')?.slot_changes.map(change=>change.value)).toEqual(['Alice Smith','alice@example.com']);
+  expect(explicitContactTurn('My name is Alice Smith. My email is alice@example.com.')?.slot_changes.map(change=>change.value)).toEqual(['Alice Smith','alice@example.com']);
+  expect(explicitContactTurn('My name is Alice Smith.')).toBeNull();
+  const booking=explicitBookingTurn('I want to book a Consultation with Consultant on November 1st, 2026 at 11 a.m.',schedule,config);expect(booking?.slot_changes.map(change=>change.key)).toEqual(['service_id','resource_id','preferred_date','starts_at']);expect(submitTurn.safeParse(booking).success).toBe(true);
+ });
  it('parses the unified call ID, never leaks provider error text, and uses server credentials',async()=>{
   expect(callIdFromLocation('/v1/realtime/calls/rtc_test123')).toBe('rtc_test123');expect(()=>callIdFromLocation('/other/rtc_test123')).toThrow();
   const env={...f.env,LIVE_AI_ENABLED:true,OPENAI_API_KEY:'sk-offline-fixture-credential'};
   let request:RequestInit|undefined;const client=new OpenAIRealtimeProvider(env,async(_url,init)=>{request=init;return new Response('v=0\r\nanswer',{status:201,headers:{location:'/v1/realtime/calls/rtc_test123'}});});
   expect(await client.createCall('v=0\r\noffer','opaque-safety-id')).toEqual({callId:'rtc_test123',answerSdp:'v=0\r\nanswer'});
   expect((request?.headers as Record<string,string>).Authorization).toContain('sk-offline-fixture');expect((request?.body as FormData).get('sdp')).toBe('v=0\r\noffer');
+  expect(JSON.parse(String((request?.body as FormData).get('session'))).max_output_tokens).toBe(1024);
   const broken=new OpenAIRealtimeProvider(env,async()=>new Response('private provider payload',{status:401}));await expect(broken.createCall('v=0\r\noffer','opaque')).rejects.toMatchObject({code:'PROVIDER_UNAVAILABLE',message:'Provider rejected call setup (401)'});
   const timeout=new OpenAIRealtimeProvider(env,async()=>{throw Error('secret transport detail');});await expect(timeout.createCall('v=0\r\noffer','opaque')).rejects.toMatchObject({code:'PROVIDER_SETUP_UNKNOWN',message:'Provider setup did not return a confirmed result'});
  });
@@ -44,6 +64,14 @@ describe('offline voice provider and accounting',()=>{
   const spoken=`book ${f.service.id} ${f.resource.id} ${date} ${startsAt} Voice Customer voice@example.test`;
   onEvent({type:'conversation.item.input_audio_transcription.completed',item_id:'item_booking',transcript:spoken,usage:{type:'duration',seconds:2}});
   await vi.waitFor(()=>expect(emitted.filter(e=>(e as {type:string}).type==='response.create')).toHaveLength(2));
+  const firstInterpretation=emitted.at(-1) as {response:{instructions:string}};
+  expect((emitted.at(-1) as {response:{max_output_tokens:number}}).response.max_output_tokens).toBe(1024);
+  expect(firstInterpretation.response.instructions).toContain('Consultation');
+  expect(firstInterpretation.response.instructions).toContain('Consultant');
+  expect(firstInterpretation.response.instructions).toContain('Asia/Karachi');
+  expect(firstInterpretation.response.instructions).toContain(f.service.id);
+  expect(firstInterpretation.response.instructions).toContain(f.resource.id);
+  expect(firstInterpretation.response.instructions).toContain('Never confirm or execute an action');
   const changedSpoken=`book ${f.service.id} ${f.resource.id} ${date} ${changedAt} Voice Customer voice@example.test`;
   onEvent({type:'conversation.item.input_audio_transcription.completed',item_id:'item_booking_new',transcript:changedSpoken,usage:{type:'duration',seconds:2}});
   const interpretation={intent:'book',slot_changes:[{key:'service_id',op:'set',value:f.service.id,evidence:f.service.id},{key:'resource_id',op:'set',value:f.resource.id,evidence:f.resource.id},{key:'preferred_date',op:'set',value:date,evidence:date},{key:'starts_at',op:'set',value:changedAt,evidence:changedAt},{key:'name',op:'set',value:'Voice Customer',evidence:'Voice Customer'},{key:'email',op:'set',value:'voice@example.test',evidence:'voice@example.test'}],requested_operation:null,question_text:null,uncertain_fields:[]};
@@ -63,6 +91,16 @@ describe('offline voice provider and accounting',()=>{
   failHangup=false;await lifecycle.end(f.business.id,admitted.session.id,'retry_hangup');expect(hangups).toBe(2);
   const closed=await one<{status:string;usageComplete:boolean;reservedUsd:string}>(f.db,sql`select status,usage_complete,reserved_usd from voice_sessions where business_id=${f.business.id} and id=${admitted.session.id}`);expect(closed?.status).toBe('closed');expect(closed?.usageComplete).toBe(false);expect(Number(closed?.reservedUsd)).toBe(.25);
   await expect(admitLiveOwnerTest(f.db,env,f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1')).rejects.toMatchObject({code:'BUDGET_GUARD'});
+  const reconciled=await reconcileProviderSpend(f.db,admitted.session.id,0.01,0.02);
+  expect(reconciled).toMatchObject({displayedUsd:0.01,accountedUsd:0.02,reserveReleasedUsd:0.25});
+  const guard=await one<{lifetimeObservedUsd:string;unresolvedReserveUsd:string}>(f.db,sql`select lifetime_observed_usd,unresolved_reserve_usd from usage_guard_state where id=1`);
+  expect(Number(guard?.lifetimeObservedUsd)).toBeGreaterThanOrEqual(0.02);
+  expect(Number(guard?.unresolvedReserveUsd)).toBe(0);
+  const audit=await one<{safeMetadata:{displayedUsd:number;providerFinalEventReceived:boolean}}>(f.db,sql`select safe_metadata from audit_events where business_id=${f.business.id} and operation='voice.usage_reconciled' and target_id=${admitted.session.id}`);
+  expect(audit?.safeMetadata).toMatchObject({displayedUsd:0.01,providerFinalEventReceived:false});
+  await expect(reconcileProviderSpend(f.db,admitted.session.id,0.01,0.02)).rejects.toMatchObject({code:'RECONCILIATION_NOT_ALLOWED'});
+  const second=await admitLiveOwnerTest(f.db,env,f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1');
+  await lifecycle.end(f.business.id,second.session.id,'offline_cleanup');
   lifecycle.close();
  });
  it('deduplicates response usage and retains the first rate snapshot',async()=>{
@@ -74,5 +112,23 @@ describe('offline voice provider and accounting',()=>{
   expect((await persistUsage(f.db,f.business.id,s!.id,'response','resp_fixture',usage,'gpt-realtime-2.1-mini')).recorded).toBe(true);
   expect((await persistUsage(f.db,f.business.id,s!.id,'response','resp_fixture',usage,'gpt-realtime-2.1-mini')).recorded).toBe(false);
   const result=await one<{count:number}>(f.db,sql`select count(*)::int as count from usage_events where business_id=${f.business.id} and session_id=${s!.id} and provider_event_key='resp_fixture'`);expect(result?.count).toBe(1);
+ });
+ it('finalizes Realtime usage from terminal events without session.closed and retains an unfinished audio turn',async()=>{
+  const env={...f.env,LIVE_AI_ENABLED:true,OPENAI_API_KEY:'sk-offline-fixture-credential'};
+  let emit=(value:unknown)=>{void value;},closed=()=>{};let call=0;
+  const provider:RealtimeProvider={createCall:async()=>({callId:`rtc_terminal_${++call}`,answerSdp:'v=0\r\nanswer'}),attach:async()=>({send:event=>{if((event as {type:string}).type==='session.update')queueMicrotask(()=>emit({type:'session.updated',session:{audio:{input:{turn_detection:{create_response:false,interrupt_response:true}}}}}));},close:()=>closed(),onEvent:handler=>{emit=handler;},onClose:handler=>{closed=handler;}}),hangup:async()=>closed()};
+  const lifecycle=new VoiceLifecycle(f.db,env,provider);await lifecycle.reconcile();
+  const zero={input_tokens:0,output_tokens:0,input_token_details:{text_tokens:0,audio_tokens:0,cached_tokens_details:{text_tokens:0,audio_tokens:0}},output_token_details:{text_tokens:0,audio_tokens:0}};
+  const complete=await admitLiveOwnerTest(f.db,env,f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1');await lifecycle.offer(f.business.id,complete.session.id,'v=0\r\na sufficiently long local offer');
+  emit({type:'response.created',response:{id:'resp_terminal_1',metadata:{response_purpose:'speech'}}});emit({type:'response.done',response:{id:'resp_terminal_1',status:'completed',usage:zero}});
+  await vi.waitFor(async()=>expect((await one<{count:number}>(f.db,sql`select count(*)::int as count from usage_events where session_id=${complete.session.id}`))?.count).toBe(1));
+  await lifecycle.end(f.business.id,complete.session.id,'offline_stop');
+  expect(await one<{usageComplete:boolean;reservedUsd:string}>(f.db,sql`select usage_complete,reserved_usd from voice_sessions where id=${complete.session.id}`)).toMatchObject({usageComplete:true,reservedUsd:'0.000000'});
+  const unfinished=await admitLiveOwnerTest(f.db,env,f.business.id,f.user.id,f.selected.snapshot.id,'owner-voice-test-v1');await lifecycle.offer(f.business.id,unfinished.session.id,'v=0\r\na sufficiently long local offer');
+  emit({type:'response.created',response:{id:'resp_terminal_2',metadata:{response_purpose:'speech'}}});emit({type:'response.done',response:{id:'resp_terminal_2',status:'completed',usage:zero}});emit({type:'input_audio_buffer.speech_started'});emit({type:'input_audio_buffer.speech_stopped'});emit({type:'input_audio_buffer.committed',item_id:'item_unfinished'});
+  await vi.waitFor(async()=>expect((await one<{count:number}>(f.db,sql`select count(*)::int as count from usage_events where session_id=${unfinished.session.id}`))?.count).toBe(1));
+  await lifecycle.end(f.business.id,unfinished.session.id,'offline_stop');
+  expect(await one<{usageComplete:boolean;reservedUsd:string}>(f.db,sql`select usage_complete,reserved_usd from voice_sessions where id=${unfinished.session.id}`)).toMatchObject({usageComplete:false,reservedUsd:'0.250000'});
+  lifecycle.close();
  });
 });

@@ -55,8 +55,9 @@ export class VoiceLifecycle{
   const s=required(await one<Session>(this.db,sql`select * from voice_sessions where business_id=${b} and id=${id}`));if(s.status==='closed'||s.status==='failed')return {status:s.status};
   if(s.status==='termination_unknown'&&!s.providerRealtimeCallId)throw new HttpError(503,'TERMINATION_UNKNOWN','Call setup may have created an untracked provider call; reconcile operator usage');
   await this.db.execute(sql`update voice_sessions set status='closing',outcome=${reason} where business_id=${b} and id=${id} and status<>'termination_unknown'`);
+  const controller=this.controllers.get(id);controller?.expectClose();
   if(s.providerRealtimeCallId){try{await this.provider.hangup(s.providerRealtimeCallId);}catch{await this.unknown(b,id);throw new HttpError(503,'TERMINATION_UNKNOWN','Provider termination could not be verified');}}
-  const controller=this.controllers.get(id);if(controller)await controller.waitForFinalUsage();controller?.stop();this.controllers.delete(id);
+  if(controller){await controller.waitForFinalUsage();if(controller.usageComplete())await this.db.execute(sql`update voice_sessions set usage_complete=true where business_id=${b} and id=${id}`);}controller?.stop();this.controllers.delete(id);
   await endSession(this.db,this.env,b,id);
   await this.db.execute(sql`update voice_sessions set outcome=${reason} where business_id=${b} and id=${id}`);
   const final=required(await one<{usageComplete:boolean}>(this.db,sql`select usage_complete from voice_sessions where business_id=${b} and id=${id}`));

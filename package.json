@@ -15,6 +15,7 @@
     "test": "npm run test -w @bellntell/api",
     "test:isolated": "node --env-file=.env scripts/test-isolated.mjs",
     "test:built": "node --env-file=.env scripts/smoke-built.mjs",
+    "voice:reconcile": "node --env-file=.env scripts/reconcile-voice.mjs",
     "test:browser": "npm run test:browser -w @bellntell/web",
     "build": "npm run build --workspaces"
   },
